@@ -2,6 +2,8 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
+module Dynamic where
+
 -- | Description: Experiments in user customizable data generation in PADS
 --
 -- Experiments with allowing users to customize data generation by
@@ -47,8 +49,6 @@ runPadsGen = id
 
 ----------------------------------------------------------------
 -- * Hand written PADS library code used in TH-derived generators
---
--- Totally dynamic version.
 
 defaultOvs :: [Override]
 defaultOvs = []

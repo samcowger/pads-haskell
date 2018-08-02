@@ -84,6 +84,18 @@ library:
     - Language.Pads.Library.Native
     - Language.Pads.DataGen.Generation
 
+executables:
+  generation-overrides-experiment:
+    source-dirs:
+    - generation-overrides-experiment
+    main: Static
+    ghc-options:
+    - -Wall
+    - -fno-warn-name-shadowing
+    dependencies:
+    - ghc-prim
+    - pretty-show
+
 tests:
   examples:
     source-dirs:
