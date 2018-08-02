@@ -73,8 +73,8 @@ genIntOvs _ = return 42
 -- Cases (2) and (3) are actually treated the same, since in both
 -- cases we just pass the list of relevant overrides down the call
 -- tree; in case (3) the override list just happens to be empty.
-override :: forall a. Typeable a => Field -> [Override] -> ([Override] -> PadsGen a) -> PadsGen a
-override field ovs defaultGen = gen filteredOvs
+override :: forall a. Typeable a => Field -> ([Override] -> PadsGen a) -> [Override] -> PadsGen a
+override field defaultGen ovs = gen filteredOvs
   where
     -- The overrides corresponding to the given field, with their
     -- paths specialized to that field (i.e. the given field is
@@ -106,8 +106,8 @@ genR1 = genR1Ovs defaultOvs
 
 genR1Ovs :: [Override] -> PadsGen R1
 genR1Ovs ovs = do
-  x <- override "R1.x" ovs genIntOvs
-  y <- override "R1.y" ovs genIntOvs
+  x <- override "R1.x" genIntOvs ovs
+  y <- override "R1.y" genIntOvs ovs
   return R1{..}
 
 genR2 :: PadsGen R2
@@ -115,8 +115,8 @@ genR2 = genR2Ovs defaultOvs
 
 genR2Ovs :: [Override] -> PadsGen R2
 genR2Ovs ovs = do
-  r1 <- override "R2.r1" ovs genR1Ovs
-  z <- override "R2.z" ovs genIntOvs
+  r1 <- override "R2.r1" genR1Ovs ovs
+  z <- override "R2.z" genIntOvs ovs
   return R2{..}
 
 ----------------------------------------------------------------
@@ -136,16 +136,16 @@ myGenR1 :: PadsGen R1
 myGenR1 = do
   return R1{ x = 3, y = 5 }
 
-myGenX :: PadsGen Int
-myGenX = return 123
+myGenInt :: PadsGen Int
+myGenInt = return 123
 
 myGenR2 :: PadsGen R2
 myGenR2 = genR2Ovs [ (["R2.r1"], mkOv myGenR1) ]
 
 myGenR2' :: PadsGen R2
-myGenR2' = genR2Ovs [ (["R2.r1", "R1.x"], mkOv myGenX)
-                    , (["R2.r1", "R1.y"], mkOv myGenX)
-                    , (["R2.z"],          mkOv myGenX) ]
+myGenR2' = genR2Ovs [ (["R2.r1", "R1.x"], mkOv myGenInt)
+                    , (["R2.r1", "R1.y"], mkOv myGenInt)
+                    , (["R2.z"],          mkOv myGenInt) ]
 
 main :: IO ()
 main = do
@@ -163,5 +163,5 @@ main = do
 -- > got: [([[Char]],Dynamic)] -> IO R1
 mainError :: IO ()
 mainError = do
-  r2 <- runPadsGen $ genR2Ovs [ (["R2.r1", "R1.x"], mkOv myGenR1{-should be e.g. 'myGenX'-}) ]
+  r2 <- runPadsGen $ genR2Ovs [ (["R2.r1", "R1.x"], mkOv myGenR1{-should be e.g. 'myGenInt'-}) ]
   printf "r2 = %s\n" (show r2)
