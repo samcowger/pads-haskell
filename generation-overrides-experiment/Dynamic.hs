@@ -40,6 +40,21 @@ import qualified Type.Reflection as Dyn
 -- * Types: not necessarily actual PADS types
 
 type PadsGen = IO
+-- | Representation of field names as strings of the form
+-- @"<constructor>.<field>"@.
+--
+-- Note that this isn't sufficient for distinguishing different types
+-- with the same constructor and field name, e.g. defined in different
+-- modules. To handle that case, we could change the field
+-- representation to something like
+--
+-- > data Field where
+-- >   Field :: Typeable t => Proxy t -> String -> Field
+--
+-- where @t@ is the type containing the field.  We could then compare
+-- @TypeRep@s of the @t@s, in addition to comparing the strings. That
+-- would be closer to the statically typed representation in
+-- @./Static.hs@.
 type Field = String
 type Path = [Field]
 type Override = (Path, Dynamic)

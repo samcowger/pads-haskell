@@ -11,15 +11,27 @@ module Static where
 -- | Description: Experiments in user customizable data generation in PADS
 --
 -- See @./Dynamic.hs@ for more comments.
-import Text.Printf
-
 import Data.Typeable ( Typeable, (:~:)(Refl), eqT )
-
 import GHC.TypeLits ( KnownSymbol, Symbol )
+import Text.Printf
 
 -- TODO
 --
 -- - Overrides for parameterized types.
+--
+--   E.g. @[pads| data Foo a = Foo { xs :: [a] } |]@.
+--
+--   Question: can we override the @a@ generator without overriding
+--   the @Foo@ generator? I believe the type of the @Foo@ generator is
+--   @PadsGen a -> PadsGen (Foo a)@.
+--
+-- - Overrides for indexed types.
+--
+--   E.g. @[pads| data Foo (x::Int) = Foo { body :: Bytes x } |]@.
+--
+--   Question: it seems the Haskell type of the @Bytes@ generator has
+--   to be @Int -> PadsGen Bytes@, since in Haskell land @Bytes@ is
+--   not @Int@ indexed.
 --
 -- - Overrides for non-record constructors.
 --
@@ -132,6 +144,12 @@ genInt = genIntOvs defaultOvs
 genIntOvs :: [Override Int] -> PadsGen Int
 genIntOvs _ = return 42
 
+genString :: PadsGen String
+genString = genStringOvs defaultOvs
+
+genStringOvs :: [Override String] -> PadsGen String
+genStringOvs _ = return "default"
+
 ----------------------------------------------------------------
 -- * Example of what PADS would generate
 --
@@ -142,10 +160,10 @@ genIntOvs _ = return 42
 -- >   data R2 = R2 { r1 :: R1, z :: Int }
 -- > |]
 
-data R1 = R1 { x :: Int , y :: Int } deriving Show
+data R1 = R1 { x :: String , y :: Int } deriving Show
 data R2 = R2 { r1 :: R1, z :: Int } deriving Show
 
-type instance FieldTy R1 "R1.x" = Int
+type instance FieldTy R1 "R1.x" = String
 type instance FieldTy R1 "R1.y" = Int
 type instance FieldTy R2 "R2.r1" = R1
 type instance FieldTy R2 "R2.z" = Int
@@ -155,7 +173,7 @@ genR1 = genR1Ovs defaultOvs
 
 genR1Ovs :: [Override R1] -> PadsGen R1
 genR1Ovs ovs = do
-  x <- override ((:@) @R1 @"R1.x") genIntOvs ovs
+  x <- override ((:@) @R1 @"R1.x") genStringOvs ovs
   y <- override ((:@) @R1 @"R1.y") genIntOvs ovs
   return R1{..}
 
@@ -173,16 +191,19 @@ genR2Ovs ovs = do
 
 myGenR1 :: PadsGen R1
 myGenR1 = do
-  return R1{ x = 3, y = 5 }
+  return R1{ x = "myGenR1", y = 5 }
 
 myGenInt :: PadsGen Int
 myGenInt = return 123
+
+myGenString :: PadsGen String
+myGenString = return "myGenString"
 
 myGenR2 :: PadsGen R2
 myGenR2 = genR2Ovs [ (:@) @R2 @"R2.r1" := const myGenR1 ]
 
 myGenR2' :: PadsGen R2
-myGenR2' = genR2Ovs [ (:@) @R2 @"R2.r1" :. (:@) @R1 @"R1.x" := const myGenInt
+myGenR2' = genR2Ovs [ (:@) @R2 @"R2.r1" :. (:@) @R1 @"R1.x" := const myGenString
                     , (:@) @R2 @"R2.r1" :. (:@) @R1 @"R1.y" := const myGenInt
                     , (:@) @R2 @"R2.z"                      := const myGenInt ]
 

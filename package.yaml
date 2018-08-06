@@ -93,6 +93,7 @@ executables:
     - -Wall
     - -fno-warn-name-shadowing
     dependencies:
+    - pads-haskell
     - ghc-prim
     - pretty-show
 
