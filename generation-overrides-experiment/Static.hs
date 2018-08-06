@@ -15,28 +15,179 @@ import Data.Typeable ( Typeable, (:~:)(Refl), eqT )
 import GHC.TypeLits ( KnownSymbol, Symbol )
 import Text.Printf
 
--- TODO
+----------------------------------------------------------------
+-- * Notes
 --
--- - Overrides for parameterized types.
+-- - Overrides for type-parameterized types.
 --
---   E.g. @[pads| data Foo a = Foo { xs :: [a] } |]@.
+--   E.g.
 --
---   Question: can we override the @a@ generator without overriding
---   the @Foo@ generator? I believe the type of the @Foo@ generator is
---   @PadsGen a -> PadsGen (Foo a)@.
+--   @
+--   [pads|
+--     data A a = A a
+--     data B a = B { b_a :: A a } |]
+--   @.
 --
--- - Overrides for indexed types.
+--   The Haskell types this generates look identical to the PADS
+--   declaration.
 --
---   E.g. @[pads| data Foo (x::Int) = Foo { body :: Bytes x } |]@.
+--   What does an override for @b_a@ look like? It's a generator for @A
+--   a@, which is something of type @PadsGen a -> PadsGen (A a)@.
 --
---   Question: it seems the Haskell type of the @Bytes@ generator has
---   to be @Int -> PadsGen Bytes@, since in Haskell land @Bytes@ is
---   not @Int@ indexed.
+-- - Overrides for term-parameterized types.
+--
+--   E.g.
+--
+--   @
+--   [pads|
+--     data A (n :: Int) = A { a_bytes :: Bytes n }
+--     data B = B { b_n :: Int, b_a :: A b_n } |]
+--   @.
+--
+--   The Haskell types here are different from the PADS declarations,
+--   because Haskell does not support term parameters. The Haskell
+--   types are
+--
+--   @
+--   data A = A { a_bytes :: Bytes }
+--   data B = B { b_n :: Int, b_a :: A }
+--   @
+--
+--   What does an override for @b_a@ look like? It's a generator for
+--   @A@ that takes an int argument corresponding to the term
+--   parameter @b_n@, i.e. something of type @Int -> PadsGen A@.
+--
+--   - Overrides for nested parameterized types.
+--
+--   Given a PADS description with nested parameters overriding a
+--   specific field could be problematic. E.g. for the PADS decl
+--
+--   @
+--   [pads|
+--     data A a = A a
+--     data B = B { b_n :: Int, b_a :: A (Bytes b_n) } |]
+--   @
+--
+--   with corresponding Haskell types
+--
+--   @
+--   data A = A a
+--   data B = B { b_n :: Int, b_a :: A Bytes }
+--   @
+--
+--   an override for the @b_a@ field has type @PadsGen Bytes ->
+--   PadsGen (A Bytes)@, and gives no access to the @Int@ param giving
+--   the length of the bytes. Why? Because the generator for @B@ that
+--   PADS synthesizes looks like
+--
+--   @
+--   b_genM = do
+--     b_n <- int_genM
+--     b_a <- a_genM (bytes_genM b_n)
+--     return (B b_n b_a)
+--   @
+--
+--   and a user override of generation for the @b_a@ field simply
+--   replaces @a_genM@ there with what the user specifies. But there's
+--   no way for the user to extract the @b_n@ from the @bytes_genM
+--   b_n@.
+--
+--   However, we can work around this using PADS type synonyms!
+--   Consider instead this alternative PADS declaration that defines
+--   the same Haskell types, but with different generators:
+--
+--   @
+--   [pads|
+--     data A a = A a
+--     type ABytes (n :: Int) = A (Bytes n)
+--     data B = B { b_n :: Int, b_a :: ABytes b_n } |]
+--   @
+--
+--   The generated Haskell types are equivalent:
+--
+--   @
+--   data A = A a
+--   type ABytes = A Bytes
+--   data B = B { b_n :: Int, b_a :: ABytes }
+--   @
+--
+--   But the generator types are now different, and given access to
+--   the @Int@ parameter. Namely, PADS generates
+--
+--   @
+--   aBytes_genM (n :: Int) = a_genM (bytes_genM n)
+--   b_genM = do
+--     b_n <- int_genM
+--     b_a <- aBytes_genM b_n
+--     return (B b_n b_a)
+--   @
+--
+--   and the user can now override the @b_a@ field's generation with
+--   something of the type of @aBytes_genM@, i.e. @Int -> PadsGen
+--   ABytes@, or equivalently @Int -> PadsGen (A Bytes)@. Now there is
+--   an @Int@ argument corresponding to @b_n@, and so the user has
+--   complete control again.
 --
 -- - Overrides for non-record constructors.
 --
--- - Wild card paths? E.g. override generation of all Ints, indep of
---   position?
+--   For record constructors we refer to fields by their name. But
+--   what about for non-record constructors with no names? For unnamed
+--   fields we can use numeric indices.
+--
+--   E.g. given the PADS declaration
+--
+--   @
+--   [pads|
+--   data E a b = L a | M a b | R b |]
+--   @
+--
+--   we could give its field types as
+--
+--   @
+--   type instance FieldTy (E a b) "L.0" = a
+--   type instance FieldTy (E a b) "M.0" = a
+--   type instance FieldTy (E a b) "M.1" = b
+--   type instance FieldTy (E a b) "R.0" = b
+--   @
+--
+--   For built-in types we have to include such instances in the PADS
+--   library of course.
+
+----------------------------------------------------------------
+-- * TODO
+--
+-- - Add wild card paths?
+--
+--   E.g. override generation of all @Int@s, indep of position?
+--
+-- - Add overrides for distribution of base types?
+--
+--   Could be achieved using wild card overrides (above).
+--
+-- - Add overrides for distribution of constructors in sum types?
+--
+--   Currently constructors are always generated uniformly. E.g. given
+--
+--   @
+--   [pads|
+--   data E a b = L a | R b |]
+--   @
+--
+--   PADS produces
+--
+--   @
+--   e_genM a__g b__g = do
+--     let dos_aCoM
+--           = [do x <- a__g
+--                 (return :: a -> PadsGen a) (L x),
+--              do x <- b__g
+--                 (return :: a -> PadsGen a) (R x)]
+--     index <- randNumBound ((length dos) - 1)
+--     (dos !! index)
+--   @
+--
+--   We could add a way to override the generation of @index@ there,
+--   without having to duplicate the rest of that generator code.
 --
 -- - Better error messages using GHC custom type error feature?
 --
