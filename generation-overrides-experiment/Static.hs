@@ -11,9 +11,12 @@ module Static where
 -- | Description: Experiments in user customizable data generation in PADS
 --
 -- See @./Dynamic.hs@ for more comments.
-import Data.Typeable ( Typeable, (:~:)(Refl), eqT )
-import GHC.TypeLits ( KnownSymbol, Symbol )
-import Text.Printf
+import           Data.Typeable ( Typeable, (:~:)(Refl), eqT )
+import           GHC.TypeLits ( KnownSymbol, Symbol )
+import           Text.Printf
+import           Control.Monad
+
+import           Text.Show.Pretty ( ppShow )
 
 import qualified System.Random as R
 
@@ -235,7 +238,7 @@ infixr 5 :.
 data Override (t :: *) where
   (:=) :: FieldTy t f ~ ft
        => Field t f
-       -> ([Override ft] -> PadsGenTy ft)
+       -> ([Override ft] -> FieldPadsGenTy t f)
        -> Override t
   (:.) :: FieldTy t f ~ ft
        => Field t f
@@ -251,31 +254,45 @@ data Override (t :: *) where
 -- fields are referred to using zero based indices. See the @E a b@
 -- example.
 type family FieldTy (t :: *) (f :: Symbol) :: *
-
--- | The PADS library provides
+data NoIndent1 -- Hack to fix editor: Emacs Haskell mode gets confused by open type families.
 
 -- | The PADS generator type for a field.
 --
--- The generator type
+-- The generator type is not simply a function of the type being
+-- generated, but also depends on where it's being generated. So, this
+-- type family is similar to 'FieldTy' and gives the generator type
+-- for a field.
 --
--- > PadsGenTy [pads| T a1 ... am (i1 :: t1, ..., in :: tn) = ... |]
+-- Given a field @f@ of a constructor @C@ of a PADS type @T@,
 --
--- is
+-- > [pads| data T ... = C { ..., f :: s1 ... sm <| e :: (t1, ..., tn) |>, ... } |]
 --
--- > PadsGen a1 -> ... -> PadsGen am -> (t1, ..., tn) -> PadsGen (T a1 ... am)
+-- say, the corresponding @FieldPadsGenTy@ is
 --
--- when @n > 0@ and
+-- > FieldPadsGenTy @T @"C.f"@ = PadsGen s1 -> ... -> PadsGen sm -> (t1, ..., tn) -> PadsGen (s1 ... sm)
 --
--- > PadsGen a1 -> ... -> PadsGen am -> PadsGen (T a1 ... am)
+-- or
 --
--- otherwise.
-type family PadsGenTy (t :: *) :: *
-
--- | The PADS library provides the @PadsGenTy@ instances for the built
--- in types.
-type instance PadsGenTy String = PadsGen String
-type instance PadsGenTy Int = PadsGen Int
-type instance PadsGenTy Bytes = Int -> PadsGen Bytes
+-- > FieldPadsGenTy @T @"C.f"@ = PadsGen s1 -> ... -> PadsGen sm -> PadsGen (s1 ... sm)
+--
+-- if @n@ is zero.
+--
+-- The reason we can't simply compute the generator type of the field
+-- from the field type alone is that different instantiations of the
+-- parameters in a field type would lead to generators of different
+-- arities, and we need a fixed generator arity. For example, for the
+-- type @T@ defined by
+--
+-- > [pads| data T a = C { f :: a } |]
+--
+-- the generator type for field @f@ would be @PadsGen Int@ for @T
+-- Int@, but would be @Int -> PadsGen Bytes@ for @T Bytes@. By
+-- computing the generator type from the field, and not just the
+-- field's type, we are able to treat the type parameters
+-- abstractly/uniformly, independent of how they get instantiated in
+-- particular uses.
+type family FieldPadsGenTy (t :: *) (f :: Symbol) :: *
+data NoIndent2 -- Hack to fix editor
 
 -- | Lookup the override for the given field, if any, and use the
 -- default generator otherwise.
@@ -291,15 +308,40 @@ type instance PadsGenTy Bytes = Int -> PadsGen Bytes
 -- Cases (2) and (3) are actually treated the same, since in both
 -- cases we just pass the list of relevant overrides down the call
 -- tree; in case (3) the override list just happens to be empty.
+--
+-- The idea is that the user can override the first component of the
+-- generation of fields in the generators that PADS derives. For
+-- example, given the PADS declaration
+--
+-- @
+-- [pads| data T a = C { f :: Foo a Int } |]
+-- @
+--
+-- PADS derives the default generator
+--
+-- @
+-- genTOvs :: [Override (T a)] -> PadsGen a -> PadsGen (T a)
+-- genTOvs ovs genA = do
+--   f <- override ((:@) @(T a) @"C.f") genFooOvs ovs genA
+-- @
+--
+-- The user can then override the @genFooOvs@ with
+--
+-- @
+-- myGenTInt :: PadsGen (T Int)
+-- myGenTInt = genTOvs [(:@) @(T Int) @"C.f" := myGenFooOvs] myGenInt
+-- @
+--
+-- where the @my*@ functions are defined by the user the user.
 override :: forall t f ft. FieldTy t f ~ ft =>
-  Field t f -> ([Override ft] -> PadsGenTy ft) -> [Override t] -> PadsGenTy ft
+  Field t f -> ([Override ft] -> FieldPadsGenTy t f) -> [Override t] -> FieldPadsGenTy t f
 override (:@) defaultGen ovs = gen filteredOvs
   where
     gen = case findExactOv ovs of
       Just ovGen -> ovGen
       Nothing -> defaultGen
 
-    findExactOv :: [Override t] -> Maybe ([Override ft] -> PadsGenTy ft)
+    findExactOv :: [Override t] -> Maybe ([Override ft] -> FieldPadsGenTy t f)
     findExactOv [] = Nothing
     findExactOv (ov : ovs') =
       case ov of
@@ -343,7 +385,7 @@ genInt :: PadsGen Int
 genInt = genIntOvs defaultOvs
 
 genIntOvs :: [Override Int] -> PadsGen Int
-genIntOvs _ = return 42
+genIntOvs _ = return 0
 
 genString :: PadsGen String
 genString = genStringOvs defaultOvs
@@ -352,12 +394,12 @@ genStringOvs :: [Override String] -> PadsGen String
 genStringOvs _ = return "default"
 
 -- | Built into PADS.
-data Bytes = Bytes Int
+data Bytes = Bytes Int deriving Show
 
-genBytes :: PadsGenTy Bytes
+genBytes :: Int -> PadsGen Bytes
 genBytes n = return (Bytes n)
 
-genBytesOvs :: [Override Bytes] -> PadsGenTy Bytes
+genBytesOvs :: [Override Bytes] -> Int -> PadsGen Bytes
 genBytesOvs _ = genBytes
 
 ----------------------------------------------------------------
@@ -378,8 +420,11 @@ type instance FieldTy R1 "R1.y" = Int
 type instance FieldTy R2 "R2.r1" = R1
 type instance FieldTy R2 "R2.z" = Int
 
-type instance PadsGenTy R1 = PadsGen R1
-type instance PadsGenTy R2 = PadsGen R2
+type instance FieldPadsGenTy R1 "R1.x" = PadsGen String
+type instance FieldPadsGenTy R1 "R1.y" = PadsGen Int
+type instance FieldPadsGenTy R2 "R2.r1" = PadsGen R1
+type instance FieldPadsGenTy R2 "R2.z" = PadsGen Int
+
 
 genR1 :: PadsGen R1
 genR1 = genR1Ovs defaultOvs
@@ -406,20 +451,23 @@ genR2Ovs ovs = do
 -- >   data A (n :: Int) = A { a_a :: Bytes n }
 -- > |]
 
-data E a b = L a | M a b | R b
-data A = A { a_a :: Bytes }
+data E a b = L a | M a b | R b deriving Show
+data A = A { a_a :: Bytes } deriving Show
 
 type instance FieldTy (E a b) "L.0" = a
 type instance FieldTy (E a b) "M.0" = a
 type instance FieldTy (E a b) "M.1" = b
 type instance FieldTy (E a b) "R.0" = b
-type instance PadsGenTy (E a b) = PadsGen a -> PadsGen b -> PadsGen (E a b)
+type instance FieldPadsGenTy (E a b) "L.0" = PadsGen a
+type instance FieldPadsGenTy (E a b) "M.0" = PadsGen a
+type instance FieldPadsGenTy (E a b) "M.1" = PadsGen b
+type instance FieldPadsGenTy (E a b) "R.0" = PadsGen b
 
 type instance FieldTy A "A.a_a" = Bytes
-type instance PadsGenTy A = Int -> PadsGen Bytes
+type instance FieldPadsGenTy A "A.a_a" = Int -> PadsGen Bytes
 
--- Q: Should the argument generators, e.g. in @genEOvs@ below, also
--- receive overrides?
+-- Q: Should the argument generators, e.g. @genA@ and @genB@ in
+-- @genEOvs@ below, also receive overrides?
 --
 -- A1: Yes, since they're used to override fields?
 --
@@ -430,35 +478,36 @@ type instance PadsGenTy A = Int -> PadsGen Bytes
 -- distribution of base types?
 --
 -- ???
-genEOvs :: forall a b. [Override (E a b)] -> PadsGenTy (E a b)
+genEOvs :: forall a b.
+  (Typeable a, Typeable b) =>
+  [Override (E a b)] -> PadsGen a -> PadsGen b -> PadsGen (E a b)
 genEOvs ovs genA genB = choose
-  -- Problem: as an argument to @genEOvs@ we have @genA :: PadsGen a@,
-  -- but when passing it to @override@ in generating a field we need
-  -- @genA :: PadsGenTy a@, and those are not the same in general. In
-  -- fact, they're not even the same shape, in that @PadsGenTy a@ will
-  -- take a variable number of arguments, depending on what @a@
-  -- actually is.
-  --
-  -- Solution: replace @PadsGenTy@ with a new type family @FieldGenTy@
-  -- that computes the generator type based on the field in the
-  -- enclosing type, not the field type itself. This will allow us to
-  -- implement "the user can override the first component of the
-  -- generation" semantics, and could perhaps even be generalized to
-  -- overriding any component of the generation, at the expense of
-  -- complicating the interface.
   [ do a <- override ((:@) @(E a b) @"L.0") (const genA) ovs
        return $ L a
-  , do a <- genA
-       b <- genB
+  , do a <- override ((:@) @(E a b) @"M.0") (const genA) ovs
+       b <- override ((:@) @(E a b) @"M.1") (const genB) ovs
        return $ M a b
-  , do b <- genB
+  , do b <- override ((:@) @(E a b) @"R.0") (const genB) ovs
        return $ R b
   ]
 
+genE :: forall a b.
+  (Typeable a, Typeable b) =>
+  PadsGen a -> PadsGen b -> PadsGen (E a b)
+genE = genEOvs defaultOvs
 
+genAOvs :: [Override A] -> Int -> PadsGen A
+genAOvs ovs n = do
+  a_a <- override ((:@) @A @"A.a_a") genBytesOvs ovs n
+  return $ A a_a
+
+genA :: Int -> PadsGen A
+genA = genAOvs defaultOvs
 
 ----------------------------------------------------------------
--- * Example of how user can then override generation
+-- * Examples of how user can then override generation
+
+-- ** Without parameters
 
 myGenR1 :: PadsGen R1
 myGenR1 = do
@@ -478,11 +527,51 @@ myGenR2' = genR2Ovs [ (:@) @R2 @"R2.r1" :. (:@) @R1 @"R1.x" := const myGenString
                     , (:@) @R2 @"R2.r1" :. (:@) @R1 @"R1.y" := const myGenInt
                     , (:@) @R2 @"R2.z"                      := const myGenInt ]
 
-main :: IO ()
-main = do
+mainNoParam :: IO ()
+mainNoParam = do
   r2 <- runPadsGen myGenR2
   r2' <- runPadsGen myGenR2'
   r2'' <- runPadsGen genR2
   printf "r2 = %s\n" (show r2)
   printf "r2' = %s\n" (show r2')
   printf "r2'' = %s\n" (show r2'')
+
+-- ** With parameters
+
+myGenE :: PadsGen a -> PadsGen b -> PadsGen (E a b)
+myGenE genA genB = do
+  a <- genA
+  b <- genB
+  return $ M a b
+
+myGenA :: Int -> PadsGen A
+myGenA n = do
+  let a_a = Bytes n
+  return $ A a_a
+
+myGenEIntString :: PadsGen (E Int String)
+myGenEIntString = myGenE myGenInt myGenString
+
+-- Here we override the default @Int@ generation, but only in the @M@
+-- constructor.
+myGenEIntString' :: PadsGen (E Int String)
+myGenEIntString' = genEOvs [ (:@) @(E Int String) @"M.0" := const myGenInt ] genInt genString
+
+mainParam :: IO ()
+mainParam = do
+  a <- runPadsGen $ myGenA 45
+  a' <- runPadsGen $ genAOvs defaultOvs 45
+  printf "a = %s\n" (show a)
+  printf "a' = %s\n" (show a')
+  es <- replicateM 10 . runPadsGen $ myGenEIntString
+  es' <- replicateM 10 . runPadsGen $ myGenEIntString'
+  printf "es =\n%s\n" (ppShow es)
+  printf "es' =\n%s\n" (ppShow es')
+
+----------------------------------------------------------------
+
+main :: IO ()
+main = do
+  mainNoParam
+  printf "\n"
+  mainParam
