@@ -42,6 +42,7 @@ dependencies:
 - bytestring >= 0.10 && < 0.11
 - byteorder >= 1.0.4 && < 1.1
 - containers >= 0.5.10 && < 0.6
+- ghc-prim
 - haskell-src-meta >= 0.8 && < 0.9 # Parsing Haskell code inside of a PADS description
 - HUnit >= 1.6 && < 1.7
 - mainland-pretty >= 0.6.1 && < 0.7
@@ -64,6 +65,7 @@ library:
     - Language.Pads.CodeGen
     - Language.Pads.CoreBaseTypes
     - Language.Pads.Errors
+    - Language.Pads.Generation
     - Language.Pads.Generic
     - Language.Pads.GenPretty
     - Language.Pads.MetaData
@@ -82,7 +84,6 @@ library:
     - Language.Pads.Library.BinaryUtilities
     - Language.Pads.Library.LittleEndian
     - Language.Pads.Library.Native
-    - Language.Pads.DataGen.Generation
 
 executables:
   generation-overrides-experiment:
@@ -121,11 +122,11 @@ tests:
   # examples/Main.hs: (should your module be named something other than Main,
   # the -main-is flag will be necessary):
   gen:
-    main: src/Language/Pads/DataGen/GenTesting.hs
+    main: examples/GenTesting.hs
     ghc-options:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
-    - -main-is Language.Pads.DataGen.GenTesting
+    - -main-is GenTesting
     dependencies:
     - pads-haskell

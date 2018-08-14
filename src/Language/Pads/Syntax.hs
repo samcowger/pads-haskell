@@ -28,8 +28,8 @@ instance Lift Exp
 data PadsDecl
     -- | A pads type declaration e.g.:
     --
-    -- > [pads| type           Foo     x y z   (foo :: Int) = (x, y, z, foo) |]
-             =  PadsDeclType   String [String] (Maybe Pat) PadsTy
+    -- > [pads| type           Foo     x y z   (foo :: Int) = (x, y, z, foo) generator <|gen|> |]
+             =  PadsDeclType   String [String] (Maybe Pat) PadsTy            (Maybe Exp)
 
     -- | A pads data declaration e.g.:
     --
@@ -164,7 +164,7 @@ data BranchInfo
   deriving (Eq, Data, Typeable, Show, Lift, Generic)
 
 -- | Individual field of a pads record, "@'String'@ :: @'ConstrArg'@ where @'Exp'@"
-type FieldInfo = (Maybe String, ConstrArg, Maybe Exp)
+type FieldInfo = (Maybe String, ConstrArg, Maybe Exp, Maybe Exp)
 type ConstrArg = (PadsStrict, PadsTy)
 
 -- | A hold-over resulting from a deprecation moving from an older version of template-haskell.

@@ -70,7 +70,8 @@ typeDecl
   = do { reserved "type"
        ; (id,env) <- declLHS; pat <- patLHS
        ; rhs <- ptype env
-       ; return (PadsDeclType id env pat rhs)
+       ; genM <- optionMaybe gen
+       ; return (PadsDeclType id env pat rhs genM)
        } <?> "Pads type declaration"
 
 dataDecl :: Parser PadsDecl
@@ -95,7 +96,7 @@ obtainDecl
        ; (id,env) <- declLHS
        ; reservedOp "from"; rhs <- ptype env
        ; reserved "using"; exp <- expression
-       ; genM <- obtainGen
+       ; genM <- optionMaybe gen
        ; return (PadsDeclObtain id env rhs exp genM)
        } <?> "Pads transform type"
 
@@ -137,17 +138,16 @@ constrain env
        } <?> "Pads constrain type"
 
 predic = do { reservedOp "where"; expression }
+gen    = do { reservedOp "generator"; expression }
 
 obtain :: Env -> Parser PadsTy
 obtain env
   = do { reserved "obtain"; dst <- ptype env
        ; reservedOp "from"; src <- ptype env
        ; reserved "using"; exp <- expression
-       ; genM <- obtainGen
+       ; genM <- optionMaybe gen
        ; return (PTransform src dst exp genM)
        } <?> "Pads transform type"
-
-obtainGen = optionMaybe (do {reservedOp "generator"; expression >>= return})
 
 partition :: Env -> Parser PadsTy
 partition env
@@ -272,14 +272,16 @@ field env
   =  try (do { id <- (lower << reservedOp "::")
         ; ty <- ftype env
         ; predM <- optionMaybe predic
-        ; return (Just id, ty, predM)
+        ; genM  <- optionMaybe gen
+        ; return (Just id, ty, predM, genM)
         })
  <|> try (do { id <- lower; reservedOp "="
         ; reserved "value"
         ; exp <- expression; reservedOp "::"
         ; (strict,ty) <- ftype env
         ; predM <- optionMaybe predic
-        ; return (Just id, (strict, PValue exp ty), predM)
+        ; genM <- optionMaybe gen
+        ; return (Just id, (strict, PValue exp ty), predM, genM)
         })
  <|> do { ty <- ftype env
         ; let recordid =  (case ty of
@@ -287,7 +289,8 @@ field env
                             otherwise -> Nothing
                           )
         ; predM <- optionMaybe predic
-        ; return (recordid, ty, predM)
+        ; genM <- optionMaybe gen
+        ; return (recordid, ty, predM, genM)
         }
  <?>  "record field"
 
@@ -320,13 +323,14 @@ record1 env
        ; return (map expand args1 ++ [fld] ++ map expand args2)
        } <?> "Pads newtype record"
   where
-    expand fty = (Nothing, fty, Nothing)
+    expand fty = (Nothing, fty, Nothing, Nothing)
 
 field1 :: Env -> Parser FieldInfo
 field1 env
   = do { id <- lower; reservedOp "::"; ty <- ptype env
        ; predM <- optionMaybe predic
-       ; return (Just id, (NotStrict,ty), predM)
+       ; genM <- optionMaybe gen
+       ; return (Just id, (NotStrict,ty), predM, genM)
        }
 
 -------------------------------------------------------------------------------
@@ -427,7 +431,7 @@ lexer = PT.makeTokenParser (haskellStyle
   { reservedOpNames = ["=", "=>", "{", "}", "::", "<|", "|>", "|", reMark, "." ],
     reservedNames   = ["data", "type", "newtype", "old", "existing", "deriving",
                        "using", "where", "terminator", "length", "of", "from",
-                       "case", "constrain", "obtain", "partition","value" ]})
+                       "case", "constrain", "obtain", "partition","value","generator" ]})
 
 whiteSpace    = PT.whiteSpace  lexer
 identifier    = PT.identifier  lexer
