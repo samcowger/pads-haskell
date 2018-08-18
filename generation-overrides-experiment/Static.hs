@@ -5,6 +5,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Static where
 
@@ -291,6 +292,36 @@ data NoIndent1 -- Hack to fix editor: Emacs Haskell mode gets confused by open t
 -- field's type, we are able to treat the type parameters
 -- abstractly/uniformly, independent of how they get instantiated in
 -- particular uses.
+--
+-- For example, the above @T@ has
+--
+-- > FieldPadsGenTy (T a) "C.f" = PadsGen a
+--
+-- because the generator for @T@ that we derive is
+--
+-- > t_genM a__g = do
+-- >   f <- a__g
+-- >   return (C f)
+--
+-- and so @a__g@ needs to have type @PadsGen a@ regardless of what
+-- @a@ actually is.
+--
+-- If, instead of using @FieldPadsGenTy@, we tried to use a simpler
+--
+-- > type family PadsGenTy (t :: *) :: *
+--
+-- and said that @PadsGenTy a@ was the generator type of field
+-- @f@ in @C@, then we'd get different arity generators for
+-- different instantiations of @a@. E.g., if @a@ was @E Int String@,
+-- then we'd get
+--
+-- > PadsGenTy (E Int String) = PadsGen Int -> PadsGen String -> PadsGen (E Int String)
+--
+-- of arity 2, whereas if @a@ was @Int@ we'd get
+--
+-- > PadsGenTy Int = PadsGen Int
+--
+-- of arity zero.
 type family FieldPadsGenTy (t :: *) (f :: Symbol) :: *
 data NoIndent2 -- Hack to fix editor
 
