@@ -25,7 +25,7 @@ module Language.Pads.CodeGen where
 import Language.Pads.Syntax as PS
 import Language.Pads.MetaData
 import Language.Pads.Generic
-import Language.Pads.PadsParser
+import Language.Pads.PadsParser hiding (Result)
 import Language.Pads.CoreBaseTypes
 import Language.Pads.TH
 import qualified Language.Pads.Errors as E
@@ -97,12 +97,13 @@ genPadsDecl derivation pd@(PadsDeclData name args pat padsData derives) = do
   parseS <- genPadsParseS name args pat
   printFL <- genPadsDataPrintFL name args pat padsData
   genM <- genPadsDataGenM name args pat padsData
+  params <- genTermParamTy name pd
   serialize <- genPadsDataSerialize name args pat padsData
   def <- genPadsDataDef name args pat padsData
   let instances = mkPadsInstance name args (fmap patType pat)
   let sigs = mkPadsSignature name args (fmap patType pat)
   ast <- astDecl name pd
-  return $ dataDecs ++ parseM ++ parseS ++ printFL ++ genM ++ serialize ++ def ++ instances ++ sigs
+  return $ dataDecs ++ parseM ++ parseS ++ printFL ++ genM ++ params ++ serialize ++ def ++ instances ++ sigs
 
 genPadsDecl derivation pd@(PadsDeclNew name args pat branch derives) = do
   dataDecs <- mkNewRepMDDecl derivation name args branch derives
@@ -815,7 +816,88 @@ genPadsGenM name args patM padsTy genM = do
 genPadsDataGenM :: UString -> [LString] -> (Maybe Pat) -> PadsData -> Q [Dec]
 genPadsDataGenM name args patM padsData = do
   let body = genGenData padsData
-  mkGeneratorFunction name args patM body
+  let tyFamInfo = genTyFamInfo name args padsData
+  let (+++) = liftM2 (++)
+  (mkGeneratorFunction name args patM body) +++ (mkFieldTyDecs name args tyFamInfo)
+
+type Path   = Type
+type Result = Type
+
+genTyFamInfo :: UString -> [LString] -> PadsData -> [(Type, Path, Result)]
+genTyFamInfo name args padsData = let
+  dataTypeName   = (ConT . mkName) name
+  dataTypeTyVars = map (VarT . mkName) args
+  dataTypeApp    = foldl AppT dataTypeName dataTypeTyVars
+  augmentWithName (path, result) = (dataTypeApp, path, result)
+  in map augmentWithName (tyFamInfoFromPD padsData)
+
+  where
+    tyFamInfoFromPD :: PadsData -> [(Path, Result)]
+    tyFamInfoFromPD (PUnion bs)    = concatMap tyFamInfoFromBI bs
+    tyFamInfoFromPD (PSwitch _ xs) = concatMap (tyFamInfoFromBI . snd) xs
+
+    tyFamInfoFromBI :: BranchInfo -> [(Path, Result)]
+    tyFamInfoFromBI (BRecord conName recFields _) =
+      pathsAndResults conName recFields
+    tyFamInfoFromBI (BConstr conName conArgs _) = let
+      fakeNames  = map (Just . show) [0..]
+      fakeFields = [(n, c, Nothing, Nothing) | (n, c) <- zip fakeNames conArgs]
+      in pathsAndResults conName fakeFields
+
+    pathsAndResults :: String -> [FieldInfo] -> [(Path, Result)]
+    pathsAndResults conName recFields = concatMap mkPathResult recFields
+      where
+        mkPathResult :: FieldInfo -> [(Path, Result)]
+        mkPathResult (Just varName, (_, varTy), _, _) =
+          [((LitT . StrTyLit) (conName++"."++varName), mkRepTy varTy)]
+        mkPathResult (Nothing,_,_,_) = []
+
+
+mkFieldTyDecs :: String -> [String] -> [(Type, Path, Result)] -> Q [Dec]
+mkFieldTyDecs name args tyFamInfo = concat <$> mapM mkDecs tyFamInfo
+  where
+    mkDecs :: (Type, Path, Result) -> Q [Dec]
+    mkDecs (constr, path, result) = let
+      con = return constr :: TypeQ
+      pat = return path   :: TypeQ
+      res = return result :: TypeQ
+
+      tvs = map (VarT . mkName) args
+      --tvs' = return $ foldr (\x y -> AppT (AppT PromotedConsT x) y) PromotedNilT tvs
+      tps = mkTermParamTyName name
+
+      in [d| type instance FieldTy        $con $pat = $res |]
+
+    -- | Compute the (arrow) type of an automatically-derived generation function
+    arrowify :: [Type] -> Maybe Type -> Type -> Q Type
+    arrowify tyVars termParamTyM resultTy = let
+      padsGen  = (VarT . mkName) "PadsGen"
+      pgArgs   = map (AppT padsGen) tyVars
+      termArgs = maybe [] (:[]) termParamTyM
+      in return $ foldl1 AppT ((map (AppT ArrowT) (pgArgs ++ termArgs)) ++ [resultTy])
+
+
+genTermParamTy :: String -> PadsDecl -> Q [Dec]
+genTermParamTy n pd = let
+  name = varP (mkTermParamTyName n)
+  ns   = getTermParamTy pd
+  in [d| $name = ns |]
+
+getTermParamTy :: PadsDecl -> Maybe Type
+getTermParamTy padsDecl = case padsDecl of
+  (PadsDeclType name tyParams termParamsM _ _) -> termParamTy termParamsM
+  (PadsDeclData name tyParams termParamsM _ _) -> termParamTy termParamsM
+  (PadsDeclNew  name tyParams termParamsM _ _) -> termParamTy termParamsM
+  where
+    termParamTy :: Maybe Pat -> Maybe Type
+    termParamTy Nothing = Nothing
+    termParamTy (Just pat) = Just $ go pat
+      where
+        go (TupP ps)   = foldl AppT (TupleT (length ps)) (map go ps)
+        go (SigP p t)  = t
+        go (ParensP p) = go p
+        go _           = error $ show pat
+
 
 -- | PadsDeclNew generator declaration
 genPadsNewGenM :: UString -> [LString] -> (Maybe Pat) -> BranchInfo -> Q [Dec]
@@ -1686,6 +1768,12 @@ mkTyDefVarName str = mkName (str ++ "__d")
 mkTyGeneratorName str = mkName (strToLower str ++ "_genM")
 mkTyGeneratorQName str = mkName (appendLower str "_genM")
 mkVarGeneratorName str = mkName (strToLower str ++ "__g")
+
+
+-- ** Naming Generators
+
+mkTermParamTyName str = mkName (strToLower str ++ "_termParamTy")
+mkTermParamTyQName str = mkName (appendLower str "_termParamTy")
 
 -- ** Naming Serializers
 

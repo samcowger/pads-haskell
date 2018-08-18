@@ -1,6 +1,17 @@
-{-# LANGUAGE TypeFamilies, GeneralizedNewtypeDeriving, TemplateHaskell, ScopedTypeVariables,
-             MultiParamTypeClasses, DeriveDataTypeable, TypeSynonymInstances,
-             FlexibleInstances, UndecidableInstances, DeriveLift #-}
+{-# LANGUAGE DataKinds
+           , DeriveDataTypeable
+           , DeriveLift
+           , FlexibleInstances
+           , GADTs
+           , GeneralizedNewtypeDeriving
+           , MultiParamTypeClasses
+           , PolyKinds
+           , ScopedTypeVariables
+           , TemplateHaskell
+           , TypeFamilies
+           , TypeOperators
+           , TypeSynonymInstances
+           , UndecidableInstances #-}
 {-# OPTIONS_HADDOCK prune #-}
 {-|
   Module      : Language.Pads.CoreBaseTypes
@@ -47,6 +58,8 @@ import Control.Monad
 import Control.Monad.Reader
 import System.IO.Unsafe (unsafePerformIO)
 
+import Data.Typeable ( Typeable, (:~:)(Refl), eqT )
+import GHC.TypeLits ( KnownSymbol, Symbol )
 
 -- | Metadata type for a PADS Char
 type Char_md = Base_md
@@ -78,6 +91,9 @@ char_genM = randLetter
 
 char_serialize :: Char -> CList
 char_serialize c = toCL [CharChunk c]
+
+type instance FieldTy Char _ = Char
+type instance FieldPadsGenTy Char _ = Char
 
 ---------------------------------------------
 
@@ -1296,3 +1312,30 @@ mkStr c = "'" ++ [c] ++ "'"
 -- with predicates that refer to md, and is safe wrt parsing predicates
 -- because the md variables in their generated code are bound in lambdas.
 md = Base_md 0 Nothing
+
+
+-------------------------------------------------------------------------------
+-- * Field Types
+
+data Field (t :: *) (f :: Symbol) where
+  (:@) :: forall t f ft.
+          ( FieldTy t f ~ ft
+          , KnownSymbol f
+          , Typeable t
+          , Typeable ft )
+       => Field t f
+
+infixr 5 :.
+
+data Override (t :: *) where
+  (:=) :: FieldTy t f ~ ft
+       => Field t f
+       -> ([Override ft] -> FieldPadsGenTy t f)
+       -> Override t
+  (:.) :: FieldTy t f ~ ft
+       => Field t f
+       -> Override ft
+       -> Override t
+
+type family FieldTy        (t :: *) (f :: Symbol) :: *
+type family FieldPadsGenTy (t :: *) (f :: Symbol) :: *

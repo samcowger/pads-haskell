@@ -1,5 +1,15 @@
-{-# LANGUAGE FlexibleContexts, TypeFamilies, TemplateHaskell, QuasiQuotes, DeriveDataTypeable, ScopedTypeVariables, MultiParamTypeClasses,
-    FlexibleInstances, TypeSynonymInstances, UndecidableInstances, LambdaCase #-}
+{-# LANGUAGE DataKinds
+           , DeriveDataTypeable
+           , FlexibleContexts
+           , FlexibleInstances
+           , LambdaCase
+           , MultiParamTypeClasses
+           , QuasiQuotes
+           , ScopedTypeVariables
+           , TemplateHaskell
+           , TypeFamilies
+           , TypeSynonymInstances
+           , UndecidableInstances #-}
 {-# OPTIONS_HADDOCK prune #-}
 {-|
   Module      : Language.Pads.BaseTypes

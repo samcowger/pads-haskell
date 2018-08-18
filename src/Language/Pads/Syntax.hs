@@ -23,6 +23,7 @@ import GHC.Generics (Generic(..))
 
 instance Lift Pat
 instance Lift Exp
+instance Lift Type
 
 -- | AST form of a pads declaration with four flavors.
 data PadsDecl
