@@ -863,10 +863,15 @@ mkFieldTyDecs name args tyFamInfo = concat <$> mapM mkDecs tyFamInfo
       res = return result :: TypeQ
 
       tvs = map (VarT . mkName) args
-      --tvs' = return $ foldr (\x y -> AppT (AppT PromotedConsT x) y) PromotedNilT tvs
+      tvs' = return $ foldr (\x y -> AppT (AppT PromotedConsT x) y) PromotedNilT tvs
       tps = mkTermParamTyName name
 
-      in [d| type instance FieldTy        $con $pat = $res |]
+      (+++) = liftM2 (++)
+      in [d| type instance FieldTy        $con $pat = $res |] +++
+         [d| type instance FieldPadsGenTy $con $pat = Arrowify $tvs' (TermParamTy $con) $res |] -- $( [t| $( [| arrowify tvs $(tps) result |] ) |] ) |]
+      --in return [TySynInstD ((ConT . mkName) "FieldTy")        (TySynEqn [constr, path]                    result) ]
+      --in return [TySynInstD ((ConT . mkName) "FieldPadsGenTy") (TySynEqn [constr, path] (arrowify tvs $tps result))]
+
 
     -- | Compute the (arrow) type of an automatically-derived generation function
     arrowify :: [Type] -> Maybe Type -> Type -> Q Type

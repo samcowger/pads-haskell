@@ -1300,6 +1300,18 @@ instance Pads1 Int Bytes Bytes_md where
   def1 i = bytes_def i
 
 
+bytes_termParamTy :: Maybe Type
+bytes_termParamTy = Just (ConT ''Int)
+
+type family Arrowify (tyParams :: [*]) (termParamTy :: Maybe *) (resultTy :: *) :: * where
+  Arrowify (t:ts) m        r = PadsGen t -> Arrowify ts m r
+  Arrowify '[]    (Just t) r = t -> PadsGen r
+  Arrowify '[]     Nothing  r = PadsGen r
+type family TermParamTy (padsTy :: k) :: Maybe *
+
+type instance TermParamTy Bytes = Just Int
+
+
 {- Helper functions -}
 mkStr c = "'" ++ [c] ++ "'"
 
